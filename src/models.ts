@@ -3,6 +3,20 @@ export type Difficulty = '入门' | '进阶' | '挑战';
 export type CameraAngle = '正面' | '左侧 45°' | '右侧 45°' | '俯拍手部' | '全身远景';
 export type CaptionPosition = '下方安全区' | '上移 15%' | '角标提示' | '画面中央';
 export type GestureZone = '左侧' | '中央' | '右侧';
+export type TeacherId = 'teacher-1' | 'teacher-2';
+
+/**
+ * 跨模块前置引用。模块二的学习步骤可以引用模块一的步骤作为前置；
+ * 当目标步骤被删除或移动到其他模块时，引用会被置为 suspended（挂起），
+ * 等待引用方老师确认后才恢复 active。
+ */
+export interface StepRef {
+  moduleId: string;
+  stepId: string;
+  status: 'active' | 'suspended';
+  reason?: 'deleted' | 'moved';
+  movedToModuleId?: string;
+}
 
 export interface LessonStep {
   id: string;
@@ -20,7 +34,7 @@ export interface LessonStep {
   exercise: string;
   exerciseFeedback: string;
   altText: string;
-  prerequisiteId: string;
+  prerequisite: StepRef | null;
   difficulty: Difficulty;
   cuePoints: number[];
 }
@@ -30,6 +44,7 @@ export interface CourseModule {
   title: string;
   summary: string;
   color: string;
+  ownerId: TeacherId;
   steps: LessonStep[];
 }
 
@@ -72,6 +87,7 @@ export function createDemoProject(): CourseProject {
       title: '模块一 · 日常问候',
       summary: '建立手形、视线和面部表情之间的配合，完成三个基础问候。',
       color: '#15827a',
+      ownerId: 'teacher-1',
       steps: [
         {
           id: 'step-1-1',
@@ -89,7 +105,7 @@ export function createDemoProject(): CourseProject {
           exercise: '跟随示范完成两次，每次保持两秒。',
           exerciseFeedback: '镜面检查手掌高度是否与眉线一致。',
           altText: '教师面向镜头，用右手掌从额头向前送出，并点头微笑。',
-          prerequisiteId: '',
+          prerequisite: null,
           difficulty: '入门',
           cuePoints: [4, 16, 28],
         },
@@ -109,7 +125,7 @@ export function createDemoProject(): CourseProject {
           exercise: '固定肩部，只移动前臂完成五次。',
           exerciseFeedback: '如果动作跑偏，先在镜前标记起点和终点。',
           altText: '手部近景展示四指并拢、拇指张开的起始手形。',
-          prerequisiteId: 'step-1-1',
+          prerequisite: { moduleId: 'module-1', stepId: 'step-1-1', status: 'active' },
           difficulty: '入门',
           cuePoints: [6, 24, 42],
         },
@@ -129,7 +145,7 @@ export function createDemoProject(): CourseProject {
           exercise: '两人一组轮流完成问候，交换三次。',
           exerciseFeedback: '同伴负责确认视线和动作停顿。',
           altText: '两名学习者相对站立，交替做出问候动作并看向对方。',
-          prerequisiteId: 'step-1-2',
+          prerequisite: { moduleId: 'module-1', stepId: 'step-1-2', status: 'active' },
           difficulty: '进阶',
           cuePoints: [10, 34, 57],
         },
@@ -140,6 +156,7 @@ export function createDemoProject(): CourseProject {
       title: '模块二 · 数量表达',
       summary: '用数字、空间位置和顺序词完成价格询问。',
       color: '#8a3ffc',
+      ownerId: 'teacher-2',
       steps: [
         {
           id: 'step-2-1',
@@ -157,7 +174,7 @@ export function createDemoProject(): CourseProject {
           exercise: '按随机口令连续展示 1—5。',
           exerciseFeedback: '每个数字保持一秒，同伴随机报数。',
           altText: '教师手心朝前，依次伸出食指到五指，展示数字一到五。',
-          prerequisiteId: '',
+          prerequisite: null,
           difficulty: '入门',
           cuePoints: [8, 26, 44],
         },
@@ -177,7 +194,7 @@ export function createDemoProject(): CourseProject {
           exercise: '配合疑问表情完成三次询问。',
           exerciseFeedback: '录下动作，检查双手是否在胸前同一高度。',
           altText: '教师双手机械交替翻转后，食指朝前点出并抬眉疑问。',
-          prerequisiteId: 'step-2-1',
+          prerequisite: { moduleId: 'module-2', stepId: 'step-2-1', status: 'active' },
           difficulty: '进阶',
           cuePoints: [5, 22, 37],
         },
@@ -214,11 +231,18 @@ export function validateProject(project: CourseProject): ValidationCheck[] {
   if (!project.title.trim()) checks.push({ id: 'title', severity: 'error', title: '课程标题缺失', detail: '发布前需要为课程填写清晰标题。' });
   if (project.modules.length === 0) checks.push({ id: 'modules', severity: 'error', title: '没有课程模块', detail: '至少需要创建一个包含学习步骤的模块。' });
 
+  const order: { moduleIndex: number; stepIndex: number; stepId: string }[] = [];
+  project.modules.forEach((candidateModule, moduleIndex) => {
+    candidateModule.steps.forEach((candidateStep, stepIndex) => {
+      order.push({ moduleIndex, stepIndex, stepId: candidateStep.id });
+    });
+  });
+
   project.modules.forEach((module) => {
     if (!module.steps.length) {
       checks.push({ id: `empty-${module.id}`, severity: 'error', title: `${module.title} 没有学习步骤`, detail: '空模块无法进入复核。', moduleId: module.id });
     }
-    module.steps.forEach((step, index) => {
+    module.steps.forEach((step) => {
       if (!step.altText.trim()) {
         checks.push({ id: `alt-${step.id}`, severity: 'error', title: `${step.title} 缺少替代文本`, detail: '示范片段需要描述手形、移动和面部表情。', stepId: step.id, moduleId: module.id });
       }
@@ -231,12 +255,27 @@ export function validateProject(project: CourseProject): ValidationCheck[] {
       if (step.duration < 20) {
         checks.push({ id: `duration-${step.id}`, severity: 'warning', title: `${step.title} 时长过短`, detail: '示范与练习不足 20 秒，学习者来不及观察和跟做。', stepId: step.id, moduleId: module.id });
       }
-      if (step.prerequisiteId) {
-        const prerequisiteIndex = module.steps.findIndex((candidate) => candidate.id === step.prerequisiteId);
-        if (prerequisiteIndex < 0) {
-          checks.push({ id: `missing-pre-${step.id}`, severity: 'error', title: `${step.title} 的前置步骤不存在`, detail: '请重新选择前置条件或移除依赖。', stepId: step.id, moduleId: module.id });
-        } else if (prerequisiteIndex >= index) {
-          checks.push({ id: `jump-${step.id}`, severity: 'error', title: `${step.title} 出现步骤跳级`, detail: '前置步骤位于当前步骤之后，学习顺序无法成立。', stepId: step.id, moduleId: module.id });
+      if (step.prerequisite) {
+        const ref = step.prerequisite;
+        const targetModule = project.modules.find((candidate) => candidate.id === ref.moduleId);
+        const targetStep = targetModule?.steps.find((candidate) => candidate.id === ref.stepId);
+        if (ref.status === 'suspended' || !targetStep) {
+          checks.push({
+            id: `suspended-pre-${step.id}`,
+            severity: 'warning',
+            title: `「${step.title}」的跨模块前置引用已挂起`,
+            detail: ref.reason === 'moved'
+              ? '目标步骤已被移动到其他模块，等待引用方确认新位置后再继续。'
+              : '目标步骤已被删除或移出课程，等待引用方重新选择前置或解除引用。',
+            stepId: step.id,
+            moduleId: module.id,
+          });
+        } else {
+          const here = order.findIndex((item) => item.stepId === step.id);
+          const there = order.findIndex((item) => item.stepId === ref.stepId);
+          if (there > here) {
+            checks.push({ id: `jump-${step.id}`, severity: 'error', title: `${step.title} 出现步骤跳级`, detail: '前置步骤位于当前步骤之后，学习顺序无法成立。', stepId: step.id, moduleId: module.id });
+          }
         }
       }
       if (step.kind === '练习' && (!step.exercise.trim() || !step.exerciseFeedback.trim())) {
